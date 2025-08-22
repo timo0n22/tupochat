@@ -10,14 +10,17 @@ import (
 
 func main() {
 
-	conn, _ := net.Dial("tcp", "localhost:9999")
+	fmt.Print("name:")
 	var text string
 	reader := bufio.NewReader(os.Stdin)
+	name, _ := reader.ReadString('\n')
+	conn, _ := net.Dial("tcp", "localhost:9999")
+	conn.Write([]byte(name))
 
 	go func() {
-		reader := bufio.NewReader(conn)
+		msgReader := bufio.NewReader(conn)
 		for {
-			msg, err := reader.ReadString('\n')
+			msg, err := msgReader.ReadString('\n')
 			if err != nil {
 				log.Fatalf("disconnected from server")
 			}
