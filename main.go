@@ -28,7 +28,7 @@ func parseMessage(msg string) (string, string) {
 func distribute(from string, message string) {
 	msg := fmt.Sprintf("%s: %s", from, message)
 	for _, client := range clients {
-			client.conn.Write([]byte(msg))
+		client.conn.Write([]byte(msg))
 	}
 }
 
@@ -41,29 +41,46 @@ func handleConnection(c Client) {
 			fmt.Printf("%s disconnected\n", c.name)
 			return
 		}
-	  tag, msg := parseMessage(data)
-		if tag == "name" {
-			old := c.name
-			c.name = msg
-			fmt.Printf("client %d, %s changed name to %s\n", c.id, old, c.name)
-		}
+		cmd, msg := parseMessage(data)
 		if msg == "/exit\n" {
 			fmt.Printf("client %d, %s exit chat\n", c.id, c.name)
 			return
 		}
-		fmt.Printf("%s: %s", c.name, msg)
-		distribute(c.name, msg)
+		switch cmd {
+		case "name":
+			old := c.name
+			c.name = msg
+			fmt.Printf("client %d, %s changed name to %s\n", c.id, old, c.name)
+		case "":
+			fmt.Printf("%s: %s", c.name, msg)
+			distribute(c.name, msg)
+		}
 	}
 }
 
 func main() {
 	ln, _ := net.Listen("tcp", ":9999")
+	nickname := "server"
 	go func() {
 		reader := bufio.NewReader(os.Stdin)
 		for {
-			msg, _ := reader.ReadString('\n')
-			fmt.Printf("server: %s", msg)
-			distribute("server", msg)
+			data, _ := reader.ReadString('\n')
+			cmd, msg := parseMessage(data)
+			switch cmd {
+			case "kick":
+				for i, client := range clients {
+					if client.name == msg {
+						fmt.Printf("kicking %s\n", msg)
+						clients = append(clients[:i], clients[i+1:]...)
+						break
+					}
+				}
+			case "name":
+				nickname = msg
+			case "":
+				fmt.Printf("%s: %s", nickname, msg)
+				distribute("%s", msg)
+			}
 		}
 	}()
 	for {
