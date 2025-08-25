@@ -69,7 +69,8 @@ func main() {
 					if client.name == msg {
 						fmt.Printf("kicking %s\n", msg)
 						delete(clients, k)
-						break
+						client.conn.Write([]byte("you are kicked\n"))
+						client.conn.Close()
 					}
 				}
 			case "id":
@@ -90,27 +91,35 @@ func main() {
 		name, _ := bufio.NewReader(conn).ReadString('\n')
 		name = strings.TrimSuffix(name, "\n")
 		id := name + "#" + strconv.Itoa(rand.Intn(9999))
-		if len(clients) > 1 {
-			for k := range clients {
-				if id == k {
-					id = name + strconv.Itoa(rand.Intn(9999))
-				}
+		client, ok := clients[name]
+		if ok {
+			conn.Write([]byte("password:\n"))
+			pswd, _ := bufio.NewReader(conn).ReadString('\n')
+			pswd = strings.TrimSuffix(pswd, "\n")
+			if pswd == client.pswd {
+				conn.Write([]byte("you have login successfully\n"))
+				go handleConnection(Client{conn, name, pswd})
+			} else {
+				conn.Write([]byte("password is incorrect\n"))
+				conn.Close()
+				continue
 			}
+		} else {
+			conn.Write([]byte("password:\n"))
+			pswd, _ := bufio.NewReader(conn).ReadString('\n')
+			pswd = strings.TrimSuffix(pswd, "\n")
+			conn.Write([]byte("confirm password:\n"))
+			confirm, _ := bufio.NewReader(conn).ReadString('\n')
+			confirm = strings.TrimSuffix(confirm, "\n")
+			if confirm != pswd {
+				conn.Write([]byte("passwords do not match\n"))
+				conn.Close()
+				continue
+			}
+			clients[id] = Client{conn, name, pswd}
+			conn.Write([]byte("use your id to login\n"))
+			conn.Write([]byte(id + "\n"))
+			go handleConnection(Client{conn, name, pswd})
 		}
-		conn.Write([]byte("password:\n"))
-		pswd, _ := bufio.NewReader(conn).ReadString('\n')
-		pswd = strings.TrimSuffix(pswd, "\n")
-		conn.Write([]byte("confirm password:\n"))
-		confirm, _ := bufio.NewReader(conn).ReadString('\n')
-		confirm = strings.TrimSuffix(confirm, "\n")
-		if confirm != pswd {
-			conn.Write([]byte("passwords do not match\n"))
-			conn.Close()
-			break
-		}
-		clients[id] = Client{conn, name, pswd}
-		conn.Write([]byte("use your id to login\n"))
-		conn.Write([]byte(id + "\n"))
-		go handleConnection(Client{conn, name, pswd})
 	}
 }
