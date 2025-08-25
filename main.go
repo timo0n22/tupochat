@@ -10,11 +10,12 @@ import (
 
 type Client struct {
 	conn net.Conn
-	id   int
+	id int
 	name string
+	pswd string
 }
 
-var clients []Client
+var clients = make(map[int]Client)
 var id = 0
 
 func parseMessage(msg string) (string, string) {
@@ -43,14 +44,14 @@ func handleConnection(c Client) {
 		}
 		cmd, msg := parseMessage(data)
 		if msg == "/exit\n" {
-			fmt.Printf("client %d, %s exit chat\n", c.id, c.name)
+			fmt.Printf("client with id %d, %s exit chat\n", c.id, c.name)
 			return
 		}
 		switch cmd {
 		case "name":
 			old := c.name
 			c.name = msg
-			fmt.Printf("client %d, %s changed name to %s\n", c.id, old, c.name)
+			fmt.Printf("client with id %d, %s changed name to %s\n", c.id, old, c.name)
 		case "":
 			fmt.Printf("%s: %s", c.name, msg)
 			distribute(c.name, msg)
@@ -71,7 +72,7 @@ func main() {
 				for i, client := range clients {
 					if client.name == msg {
 						fmt.Printf("kicking %s\n", msg)
-						clients = append(clients[:i], clients[i+1:]...)
+						delete(clients, i)
 						break
 					}
 				}
@@ -85,10 +86,11 @@ func main() {
 	}()
 	for {
 		conn, _ := ln.Accept()
-		id++
 		name, _ := bufio.NewReader(conn).ReadString('\n')
 		name = strings.TrimSuffix(name, "\n")
-		clients = append(clients, Client{conn, id, name})
-		go handleConnection(Client{conn, id, name})
+		pswd, _ := bufio.NewReader(conn).ReadString('\n')
+		pswd = strings.TrimSuffix(pswd, "\n")
+		clients[id] = Client{conn, id, name, pswd}
+		go handleConnection(Client{conn, id, name, pswd})
 	}
 }
