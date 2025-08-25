@@ -10,12 +10,9 @@ import (
 
 func main() {
 
-	fmt.Print("name:")
 	var text string
 	reader := bufio.NewReader(os.Stdin)
-	name, _ := reader.ReadString('\n')
 	conn, _ := net.Dial("tcp", "localhost:9999")
-	conn.Write([]byte(name))
 
 	go func() {
 		msgReader := bufio.NewReader(conn)

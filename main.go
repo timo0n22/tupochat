@@ -3,19 +3,20 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
 type Client struct {
 	conn net.Conn
-	id int
 	name string
 	pswd string
 }
 
-var clients = make(map[int]Client)
+var clients = make(map[string]Client)
 var id = 0
 
 func parseMessage(msg string) (string, string) {
@@ -44,14 +45,10 @@ func handleConnection(c Client) {
 		}
 		cmd, msg := parseMessage(data)
 		if msg == "/exit\n" {
-			fmt.Printf("client with id %d, %s exit chat\n", c.id, c.name)
+			fmt.Printf("client %s exit chat\n", c.name)
 			return
 		}
 		switch cmd {
-		case "name":
-			old := c.name
-			c.name = msg
-			fmt.Printf("client with id %d, %s changed name to %s\n", c.id, old, c.name)
 		case "":
 			fmt.Printf("%s: %s", c.name, msg)
 			distribute(c.name, msg)
@@ -61,7 +58,6 @@ func handleConnection(c Client) {
 
 func main() {
 	ln, _ := net.Listen("tcp", ":9999")
-	nickname := "server"
 	go func() {
 		reader := bufio.NewReader(os.Stdin)
 		for {
@@ -69,28 +65,52 @@ func main() {
 			cmd, msg := parseMessage(data)
 			switch cmd {
 			case "kick":
-				for i, client := range clients {
+				for k, client := range clients {
 					if client.name == msg {
 						fmt.Printf("kicking %s\n", msg)
-						delete(clients, i)
+						delete(clients, k)
 						break
 					}
 				}
-			case "name":
-				nickname = msg
+			case "id":
+				for k, client := range clients {
+					if client.name == msg {
+						fmt.Printf("id is %s\n", k)
+					}
+				}
 			case "":
-				fmt.Printf("%s: %s", nickname, msg)
-				distribute("%s", msg)
+				fmt.Printf("server: %s", msg)
+				distribute("server", msg)
 			}
 		}
 	}()
 	for {
 		conn, _ := ln.Accept()
+		conn.Write([]byte("name:\n"))
 		name, _ := bufio.NewReader(conn).ReadString('\n')
 		name = strings.TrimSuffix(name, "\n")
+		id := name + "#" + strconv.Itoa(rand.Intn(9999))
+		if len(clients) > 1 {
+			for k := range clients {
+				if id == k {
+					id = name + strconv.Itoa(rand.Intn(9999))
+				}
+			}
+		}
+		conn.Write([]byte("password:\n"))
 		pswd, _ := bufio.NewReader(conn).ReadString('\n')
 		pswd = strings.TrimSuffix(pswd, "\n")
-		clients[id] = Client{conn, id, name, pswd}
-		go handleConnection(Client{conn, id, name, pswd})
+		conn.Write([]byte("confirm password:\n"))
+		confirm, _ := bufio.NewReader(conn).ReadString('\n')
+		confirm = strings.TrimSuffix(confirm, "\n")
+		if confirm != pswd {
+			conn.Write([]byte("passwords do not match\n"))
+			conn.Close()
+			break
+		}
+		clients[id] = Client{conn, name, pswd}
+		conn.Write([]byte("use your id to login\n"))
+		conn.Write([]byte(id + "\n"))
+		go handleConnection(Client{conn, name, pswd})
 	}
 }
