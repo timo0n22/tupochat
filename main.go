@@ -3,26 +3,23 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"math/rand"
 	"net"
 	"os"
-	"strconv"
 	"strings"
 )
 
 type Client struct {
 	conn net.Conn
-	name string
 	pswd string
+	name string
 }
 
 var clients = make(map[string]Client)
-var id = 0
 
 func parseMessage(msg string) (string, string) {
-	split := strings.Split(msg, ":")
-	if len(split) == 2 {
-		return split[0], split[1]
+	split := strings.Split(msg, " ")
+	if len(split) > 1 {
+		return split[0], strings.Join(split[1:], " ")
 	}
 	return "", split[0]
 }
@@ -44,11 +41,17 @@ func handleConnection(c Client) {
 			return
 		}
 		cmd, msg := parseMessage(data)
-		if msg == "/exit\n" {
+		switch cmd {
+		case "/name":
+			c.name = msg
+			fmt.Printf("%s changed name to %s\n", c.name, msg)
+		}
+		switch msg {
+		case "/exit\n":
 			fmt.Printf("client %s exit chat\n", c.name)
 			return
-		}
-		switch cmd {
+		case "/help":
+			fmt.Printf("commands:\n/help - this help\n/name - change your name\n/exit - exit chat\n")
 		case "":
 			fmt.Printf("%s: %s", c.name, msg)
 			distribute(c.name, msg)
@@ -64,16 +67,15 @@ func main() {
 			data, _ := reader.ReadString('\n')
 			cmd, msg := parseMessage(data)
 			switch cmd {
-			case "kick":
-				for k, client := range clients {
-					if client.name == msg {
-						fmt.Printf("kicking %s\n", msg)
-						delete(clients, k)
-						client.conn.Write([]byte("you are kicked\n"))
-						client.conn.Close()
-					}
+			case "/help":
+				fmt.Printf("commands:\n/help - this help\n/kick id - kick client with id\n/id name - get id of client with name\n")
+			case "/kick":
+				client, ok := clients[msg]
+				if ok {
+					fmt.Printf("kicked %s\n", client.name)
+					client.conn.Close()
 				}
-			case "id":
+			case "/id":
 				for k, client := range clients {
 					if client.name == msg {
 						fmt.Printf("id is %s\n", k)
@@ -87,24 +89,40 @@ func main() {
 	}()
 	for {
 		conn, _ := ln.Accept()
-		conn.Write([]byte("name:\n"))
-		name, _ := bufio.NewReader(conn).ReadString('\n')
-		name = strings.TrimSuffix(name, "\n")
-		id := name + "#" + strconv.Itoa(rand.Intn(9999))
-		client, ok := clients[name]
+		conn.Write([]byte("login:\n"))
+		login, _ := bufio.NewReader(conn).ReadString('\n')
+		login = strings.TrimSuffix(login, "\n")
+		client, ok := clients[login]
 		if ok {
 			conn.Write([]byte("password:\n"))
 			pswd, _ := bufio.NewReader(conn).ReadString('\n')
 			pswd = strings.TrimSuffix(pswd, "\n")
 			if pswd == client.pswd {
-				conn.Write([]byte("you have login successfully\n"))
-				go handleConnection(Client{conn, name, pswd})
+				conn.Write([]byte("welcome to chat\n"))
+				client.conn = conn
+				clients[login] = client
+				go handleConnection(client)
 			} else {
 				conn.Write([]byte("password is incorrect\n"))
+				for range 2 {
+					conn.Write([]byte("try again\n"))
+					conn.Write([]byte("password:\n"))
+					pswd, _ := bufio.NewReader(conn).ReadString('\n')
+					pswd = strings.TrimSuffix(pswd, "\n")
+					if pswd == client.pswd {
+						conn.Write([]byte("welcome to chat\n"))
+						client.conn = conn
+						clients[login] = client
+						go handleConnection(client)
+						break
+					}
+				}
+				conn.Write([]byte("connection closed\n"))
 				conn.Close()
 				continue
 			}
 		} else {
+			conn.Write([]byte("login not found, creating new user\n"))
 			conn.Write([]byte("password:\n"))
 			pswd, _ := bufio.NewReader(conn).ReadString('\n')
 			pswd = strings.TrimSuffix(pswd, "\n")
@@ -112,14 +130,23 @@ func main() {
 			confirm, _ := bufio.NewReader(conn).ReadString('\n')
 			confirm = strings.TrimSuffix(confirm, "\n")
 			if confirm != pswd {
-				conn.Write([]byte("passwords do not match\n"))
+				conn.Write([]byte("passwords do not match, try again\n"))
+				for range 2 {
+					conn.Write([]byte("confirm password:\n"))
+					confirm, _ := bufio.NewReader(conn).ReadString('\n')
+					confirm = strings.TrimSuffix(confirm, "\n")
+					if confirm == pswd {
+						conn.Write([]byte("welcome to chat\n"))
+						clients[login] = Client{conn, pswd, login}
+						go handleConnection(Client{conn, pswd, login})
+						break
+					}
+				}
 				conn.Close()
 				continue
 			}
-			clients[id] = Client{conn, name, pswd}
-			conn.Write([]byte("use your id to login\n"))
-			conn.Write([]byte(id + "\n"))
-			go handleConnection(Client{conn, name, pswd})
+			clients[login] = Client{conn, pswd, login}
+			go handleConnection(Client{conn, pswd, login})
 		}
 	}
 }
