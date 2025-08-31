@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"fmt"
 	"net"
 	"os"
@@ -57,9 +58,9 @@ func handleConnection(c Client) {
 				continue
 			}
 			fmt.Printf("name must be between 1 and 20 characters\n")
-		} else if strings.TrimSuffix(cmd + msg, "\n") != "" {
-			fmt.Printf("%s: %s\n", c.name, cmd + msg)
-			distribute(c.name, cmd + msg)
+		} else if strings.TrimSuffix(cmd+msg, "\n") != "" {
+			fmt.Printf("%s: %s\n", c.name, cmd+" "+msg)
+			distribute(c.name, cmd+" "+msg)
 		}
 	}
 }
@@ -73,24 +74,19 @@ func main() {
 			fmt.Print("\033[1A")
 			fmt.Print("\033[2K")
 			cmd, msg := parseMessage(data)
-			switch cmd {
-			case "/help":
+			if cmd == "/help" {
 				fmt.Printf("commands:\n/help - this help\n/kick id - kick client with id\n/id name - get id of client with name\n")
-			case "/kick":
+				continue
+			}
+			if cmd == "/kick" {
 				client, ok := clients[msg]
 				if ok {
 					fmt.Printf("kicked %s\n", client.name)
 					client.conn.Close()
 				}
-			case "/id":
-				for k, client := range clients {
-					if client.name == msg {
-						fmt.Printf("id is %s\n", k)
-					}
-				}
-			case "":
-				fmt.Printf("server: %s", msg)
-				distribute("server", msg)
+			} else if strings.TrimSuffix(cmd+msg, "\n") != "" {
+				fmt.Printf("%s: %s", "server", cmd+" "+msg)
+				distribute("server", cmd+" "+msg)
 			}
 		}
 	}()
@@ -104,7 +100,9 @@ func main() {
 			conn.Write([]byte("password:\n"))
 			pswd, _ := bufio.NewReader(conn).ReadString('\n')
 			pswd = strings.TrimSuffix(pswd, "\n")
-			if pswd == client.pswd {
+			sh := sha256.New()
+			sh.Write([]byte(pswd))
+			if string(sh.Sum(nil)) == client.pswd {
 				conn.Write([]byte("welcome to chat\n"))
 				client.conn = conn
 				clients[login] = client
@@ -133,6 +131,7 @@ func main() {
 			conn.Write([]byte("password:\n"))
 			pswd, _ := bufio.NewReader(conn).ReadString('\n')
 			pswd = strings.TrimSuffix(pswd, "\n")
+			sh := sha256.New()
 			conn.Write([]byte("confirm password:\n"))
 			confirm, _ := bufio.NewReader(conn).ReadString('\n')
 			confirm = strings.TrimSuffix(confirm, "\n")
@@ -144,16 +143,18 @@ func main() {
 					confirm = strings.TrimSuffix(confirm, "\n")
 					if confirm == pswd {
 						conn.Write([]byte("welcome to chat\n"))
-						clients[login] = Client{conn, pswd, login}
-						go handleConnection(Client{conn, pswd, login})
+						sh.Write([]byte(pswd))
+						clients[login] = Client{conn, string(sh.Sum(nil)), login}
+						go handleConnection(Client{conn, string(sh.Sum(nil)), login})
 						break
 					}
 				}
 				conn.Close()
 				continue
 			}
-			clients[login] = Client{conn, pswd, login}
-			go handleConnection(Client{conn, pswd, login})
+			sh.Write([]byte(pswd))
+			clients[login] = Client{conn, string(sh.Sum(nil)), login}
+			go handleConnection(Client{conn, string(sh.Sum(nil)), login})
 		}
 	}
 }
