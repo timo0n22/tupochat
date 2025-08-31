@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -24,9 +25,11 @@ func main() {
 			fmt.Print(msg)
 		}
 	}()
-	
+
 	for {
 		text, _ = reader.ReadString('\n')
+		fmt.Print("\033[1A")
+		fmt.Print("\033[2K")
 		if text == "/exit\n" {
 			break
 		}
