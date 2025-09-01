@@ -2,17 +2,68 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
+var db *pgx.Conn
+
 type Client struct {
-	conn net.Conn
-	pswd string
-	name string
+	conn     net.Conn
+	login    string
+	name     string
+	pswdHash string
+}
+
+func connectDatabase() {
+	var err error
+	db, err = pgx.Connect(context.Background(), "postgres://artemloginov:raw0@localhost:5432/tupochatdb")
+	if err != nil {
+		log.Fatal("Failed to conect to database: ", err)
+	}
+}
+
+func closeDatabase() {
+	db.Close(context.Background())
+}
+
+func newClient(name string, pswd string) {
+	var err error
+	_, err = db.Exec(context.Background(), "INSERT INTO clients (username, display_name, password_hash) VALUES ($1, $2, $3)", name, name, pswd)
+	if err != nil {
+		log.Fatal("Failed to insert client: ", err)
+	}
+}
+
+func getClient(login string) Client {
+	var client Client
+	err := db.QueryRow(context.Background(), "SELECT username, display_name, password_hash FROM clients WHERE username = $1", login).Scan(&client.login, &client.name, &client.pswdHash)
+	if err != nil {
+		log.Fatal("Failed to get client: ", err)
+	}
+	return client
+}
+
+func saveMessage(from string, message string) {
+	var err error
+	var id string
+	err = db.QueryRow(context.Background(), "SELECT id FROM clients WHERE username = $1", from).Scan(&id)
+	if err != nil {
+		log.Fatal("Failed to get client id: ", err)
+	}
+	_, err = db.Exec(context.Background(), "INSERT INTO messages (sender_id, content) VALUES ($1, $2)", id, message)
+	if err != nil {
+		log.Fatal("Failed to insert message: ", err)
+	}
 }
 
 var clients = make(map[string]Client)
@@ -26,7 +77,8 @@ func parseMessage(msg string) (string, string) {
 }
 
 func distribute(from string, message string) {
-	msg := fmt.Sprintf("%s: %s\n", from, message)
+	time := time.Now().Format("2006-01-02 15:04:05")
+	msg := fmt.Sprintf("%s %s: %s\n", time, from, message)
 	for _, client := range clients {
 		client.conn.Write([]byte(msg))
 	}
@@ -53,20 +105,27 @@ func handleConnection(c Client) {
 		if cmd == "/name" {
 			if msg != "" || len(msg) <= 20 {
 				c.name = msg
-				clients[c.name] = c
+				clients[c.login] = c
+				_, err := db.Exec(context.Background(), "UPDATE clients SET display_name = $1 WHERE username = $2", msg, c.login)
+				if err != nil {
+					log.Fatal("Failed to update client: ", err)
+				}
 				fmt.Printf("%s changed name to %s\n", c.name, msg)
 				continue
 			}
-			fmt.Printf("name must be between 1 and 20 characters\n")
+			c.conn.Write([]byte("name must be between 1 and 20 characters\n"))
 		} else if strings.TrimSuffix(cmd+msg, "\n") != "" {
-			fmt.Printf("%s: %s\n", c.name, cmd+" "+msg)
+			fmt.Printf("%s %s: %s\n", time.Now().Format("2006-01-02 15:04:05"), c.name, cmd+" "+msg)
 			distribute(c.name, cmd+" "+msg)
+			saveMessage(c.login, cmd+" "+msg)
 		}
 	}
 }
 
 func main() {
 	ln, _ := net.Listen("tcp", ":9999")
+	connectDatabase()
+	defer closeDatabase()
 	go func() {
 		reader := bufio.NewReader(os.Stdin)
 		for {
@@ -85,7 +144,7 @@ func main() {
 					client.conn.Close()
 				}
 			} else if strings.TrimSuffix(cmd+msg, "\n") != "" {
-				fmt.Printf("%s: %s", "server", cmd+" "+msg)
+				fmt.Printf("%s server: %s", time.Now().Format("2006-01-02 15:04:05"), cmd+" "+msg)
 				distribute("server", cmd+" "+msg)
 			}
 		}
@@ -95,14 +154,19 @@ func main() {
 		conn.Write([]byte("login:\n"))
 		login, _ := bufio.NewReader(conn).ReadString('\n')
 		login = strings.TrimSuffix(login, "\n")
-		client, ok := clients[login]
-		if ok {
+		var registered bool
+		err := db.QueryRow(context.Background(), "SELECT EXISTS( SELECT 1 FROM clients WHERE username = $1)", login).Scan(&registered)
+		if err != nil {
+			log.Fatal("Failed to check if user is registered: ", err)
+		}
+		if registered {
+			client := getClient(login)
 			conn.Write([]byte("password:\n"))
 			pswd, _ := bufio.NewReader(conn).ReadString('\n')
 			pswd = strings.TrimSuffix(pswd, "\n")
 			sh := sha256.New()
 			sh.Write([]byte(pswd))
-			if string(sh.Sum(nil)) == client.pswd {
+			if string(sh.Sum(nil)) == client.pswdHash {
 				conn.Write([]byte("welcome to chat\n"))
 				client.conn = conn
 				clients[login] = client
@@ -114,7 +178,7 @@ func main() {
 					conn.Write([]byte("password:\n"))
 					pswd, _ := bufio.NewReader(conn).ReadString('\n')
 					pswd = strings.TrimSuffix(pswd, "\n")
-					if pswd == client.pswd {
+					if pswd == client.pswdHash {
 						conn.Write([]byte("welcome to chat\n"))
 						client.conn = conn
 						clients[login] = client
@@ -144,8 +208,10 @@ func main() {
 					if confirm == pswd {
 						conn.Write([]byte("welcome to chat\n"))
 						sh.Write([]byte(pswd))
-						clients[login] = Client{conn, string(sh.Sum(nil)), login}
-						go handleConnection(Client{conn, string(sh.Sum(nil)), login})
+						hash := hex.EncodeToString(sh.Sum(nil))
+						clients[login] = Client{conn, login, login, string(sh.Sum(nil))}
+						newClient(login, hash)
+						go handleConnection(Client{conn, login, login, string(sh.Sum(nil))})
 						break
 					}
 				}
@@ -153,8 +219,10 @@ func main() {
 				continue
 			}
 			sh.Write([]byte(pswd))
-			clients[login] = Client{conn, string(sh.Sum(nil)), login}
-			go handleConnection(Client{conn, string(sh.Sum(nil)), login})
+			hash := hex.EncodeToString(sh.Sum(nil))
+			clients[login] = Client{conn, login, login, string(sh.Sum(nil))}
+			newClient(login, hash)
+			go handleConnection(Client{conn, login, login, string(sh.Sum(nil))})
 		}
 	}
 }
