@@ -53,20 +53,47 @@ func getClient(login string) Client {
 	return client
 }
 
-func saveMessage(from string, message string) {
+func saveMessage(from string, message string, time time.Time) {
 	var err error
-	var id string
-	err = db.QueryRow(context.Background(), "SELECT id FROM clients WHERE username = $1", from).Scan(&id)
-	if err != nil {
-		log.Fatal("Failed to get client id: ", err)
-	}
-	_, err = db.Exec(context.Background(), "INSERT INTO messages (sender_id, content) VALUES ($1, $2)", id, message)
+	timestamp := time.Format("2006-01-02 15:04:05")
+	_, err = db.Exec(context.Background(), "INSERT INTO messages (sender, content, sent_at) VALUES ($1, $2, $3)", from, message, timestamp)
 	if err != nil {
 		log.Fatal("Failed to insert message: ", err)
 	}
 }
 
 var clients = make(map[string]Client)
+
+func getHistory(client Client) {
+	rows, err := db.Query(context.Background(),
+		"SELECT content, sent_at FROM messages ORDER BY sent_at ASC LIMIT 50")
+	if err != nil {
+		log.Fatal("Failed to get history: ", err)
+	}
+	defer rows.Close()
+
+	var history []string
+	var timestamps []string
+
+	for rows.Next() {
+		var msg string
+		var ts string
+		if err := rows.Scan(&msg, &ts); err != nil {
+			log.Println("Failed to scan row:", err)
+			continue
+		}
+		history = append(history, msg)
+		timestamps = append(timestamps, ts)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Fatal("Row iteration error: ", err)
+	}
+
+	for i, msg := range history {
+		client.conn.Write([]byte(timestamps[i] + " " + msg + "\n"))
+	}
+}
 
 func parseMessage(msg string) (string, string) {
 	split := strings.Split(msg, " ")
@@ -117,7 +144,7 @@ func handleConnection(c Client) {
 		} else if strings.TrimSuffix(cmd+msg, "\n") != "" {
 			fmt.Printf("%s %s: %s\n", time.Now().Format("2006-01-02 15:04:05"), c.name, cmd+" "+msg)
 			distribute(c.name, cmd+" "+msg)
-			saveMessage(c.login, cmd+" "+msg)
+			saveMessage(c.name, cmd+" "+msg, time.Now())
 		}
 	}
 }
@@ -145,7 +172,8 @@ func main() {
 				}
 			} else if strings.TrimSuffix(cmd+msg, "\n") != "" {
 				fmt.Printf("%s server: %s", time.Now().Format("2006-01-02 15:04:05"), cmd+" "+msg)
-				distribute("server", cmd+" "+msg)
+				saveMessage("server", strings.TrimSuffix(cmd+" "+msg, "\n"), time.Now())
+				distribute("server", strings.TrimSuffix(cmd+" "+msg, "\n"))
 			}
 		}
 	}()
@@ -168,9 +196,9 @@ func main() {
 			sh.Write([]byte(pswd))
 			hash := hex.EncodeToString(sh.Sum(nil))
 			if hash == client.pswdHash {
-				conn.Write([]byte("welcome to chat\n"))
 				client.conn = conn
 				clients[login] = client
+				getHistory(client)
 				go handleConnection(client)
 			} else {
 				conn.Write([]byte("password is incorrect\n"))
@@ -185,6 +213,7 @@ func main() {
 						conn.Write([]byte("welcome to chat\n"))
 						client.conn = conn
 						clients[login] = client
+						getHistory(client)
 						go handleConnection(client)
 						break
 					}
