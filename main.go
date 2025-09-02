@@ -166,7 +166,8 @@ func main() {
 			pswd = strings.TrimSuffix(pswd, "\n")
 			sh := sha256.New()
 			sh.Write([]byte(pswd))
-			if string(sh.Sum(nil)) == client.pswdHash {
+			hash := hex.EncodeToString(sh.Sum(nil))
+			if hash == client.pswdHash {
 				conn.Write([]byte("welcome to chat\n"))
 				client.conn = conn
 				clients[login] = client
@@ -178,7 +179,9 @@ func main() {
 					conn.Write([]byte("password:\n"))
 					pswd, _ := bufio.NewReader(conn).ReadString('\n')
 					pswd = strings.TrimSuffix(pswd, "\n")
-					if pswd == client.pswdHash {
+					sh.Write([]byte(pswd))
+					hash := hex.EncodeToString(sh.Sum(nil))
+					if hash == client.pswdHash {
 						conn.Write([]byte("welcome to chat\n"))
 						client.conn = conn
 						clients[login] = client
@@ -209,9 +212,9 @@ func main() {
 						conn.Write([]byte("welcome to chat\n"))
 						sh.Write([]byte(pswd))
 						hash := hex.EncodeToString(sh.Sum(nil))
-						clients[login] = Client{conn, login, login, string(sh.Sum(nil))}
+						clients[login] = Client{conn, login, login, hash}
 						newClient(login, hash)
-						go handleConnection(Client{conn, login, login, string(sh.Sum(nil))})
+						go handleConnection(Client{conn, login, login, hash})
 						break
 					}
 				}
@@ -220,9 +223,9 @@ func main() {
 			}
 			sh.Write([]byte(pswd))
 			hash := hex.EncodeToString(sh.Sum(nil))
-			clients[login] = Client{conn, login, login, string(sh.Sum(nil))}
+			clients[login] = Client{conn, login, login, hash}
 			newClient(login, hash)
-			go handleConnection(Client{conn, login, login, string(sh.Sum(nil))})
+			go handleConnection(Client{conn, login, login, hash})
 		}
 	}
 }
