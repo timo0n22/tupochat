@@ -214,7 +214,6 @@ func main() {
 					sh.Write([]byte(pswd))
 					hash := hex.EncodeToString(sh.Sum(nil))
 					if hash == client.pswdHash {
-						conn.Write([]byte("welcome to chat\n"))
 						client.conn = conn
 						clients[login] = client
 						getHistory(client)
@@ -242,7 +241,6 @@ func main() {
 					confirm, _ := bufio.NewReader(conn).ReadString('\n')
 					confirm = strings.TrimSuffix(confirm, "\n")
 					if confirm == pswd {
-						conn.Write([]byte("welcome to chat\n"))
 						sh.Write([]byte(pswd))
 						hash := hex.EncodeToString(sh.Sum(nil))
 						clients[login] = Client{conn, login, login, hash}
