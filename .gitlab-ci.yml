@@ -1,0 +1,59 @@
+stages:
+ - build
+ - deploy
+
+
+build-only-MR:
+ stage: build
+ tags:
+   - docker
+ image:
+   name: gcr.io/kaniko-project/executor:v1.9.2-debug
+   entrypoint: [ "" ]
+ script:
+   - /kaniko/executor
+     --context "${CI_PROJECT_DIR}"
+     --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+     --no-push
+ only:
+   - merge_requests
+
+
+build:
+ stage: build
+ tags:
+   - docker
+ image:
+   name: gcr.io/kaniko-project/executor:v1.9.2-debug
+   entrypoint: [ "" ]
+ script:
+   - /kaniko/executor
+     --context "${CI_PROJECT_DIR}"
+     --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+     --destination "${CI_REGISTRY_IMAGE}:latest"
+ only:
+   - main
+
+
+deploy:
+ stage: deploy
+ image: docker:20.10-git
+ tags:
+   - gitlab-org-docker
+ variables:
+   DOCKER_HOST: "ssh://${SERVER_USER}@${SERVER_HOST}"
+ before_script:
+   - mkdir -p ~/.ssh
+   - chmod 700 ~/.ssh
+   - eval $(ssh-agent -s)
+   - echo "${SSH_PRIVATE_KEY}" | tr -d '\r' | ssh-add -
+   - '[[ -f /.dockerenv || -d /run/secrets/kubernetes.io/serviceaccount ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config'
+   - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+ script:
+   - docker compose --env-file $ENV_FILE pull
+   - docker compose --env-file $ENV_FILE down --timeout=60 --remove-orphans
+   - docker compose --env-file $ENV_FILE up --build --detach
+   - docker image prune -f || true
+ only:
+   - main
+ when: manual

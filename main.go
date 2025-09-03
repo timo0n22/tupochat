@@ -26,7 +26,7 @@ type Client struct {
 
 func connectDatabase() {
 	var err error
-	db, err = pgx.Connect(context.Background(), "postgres://root:pswd@localhost:5432/tupochatdb") // TODO: change to env variables
+	db, err = pgx.Connect(context.Background(), os.Getenv("DATABASE_URL"))
 	if err != nil {
 		log.Fatal("Failed to conect to database: ", err)
 	}
@@ -66,24 +66,27 @@ var clients = make(map[string]Client)
 
 func getHistory(client Client) {
 	rows, err := db.Query(context.Background(),
-		"SELECT content, sent_at FROM messages ORDER BY sent_at ASC LIMIT 50")
+		"SELECT content, sent_at, sender FROM messages ORDER BY sent_at ASC LIMIT 500")
 	if err != nil {
 		log.Fatal("Failed to get history: ", err)
 	}
 	defer rows.Close()
 
 	var history []string
+	var names []string
 	var timestamps []string
 
 	for rows.Next() {
 		var msg string
+		var name string
 		var ts string
-		if err := rows.Scan(&msg, &ts); err != nil {
+		if err := rows.Scan(&msg, &ts, &name); err != nil {
 			log.Println("Failed to scan row:", err)
 			continue
 		}
 		history = append(history, msg)
 		timestamps = append(timestamps, ts)
+		names = append(names, name)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -91,7 +94,7 @@ func getHistory(client Client) {
 	}
 
 	for i, msg := range history {
-		client.conn.Write([]byte(timestamps[i] + " " + msg + "\n"))
+		client.conn.Write([]byte(timestamps[i] + " " + names[i] + ": " + msg + "\n"))
 	}
 }
 
@@ -150,7 +153,7 @@ func handleConnection(c Client) {
 }
 
 func main() {
-	ln, _ := net.Listen("tcp", ":9999")
+	ln, _ := net.Listen("tcp", ":5522")
 	connectDatabase()
 	defer closeDatabase()
 	go func() {
