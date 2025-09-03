@@ -26,7 +26,7 @@ type Client struct {
 
 func connectDatabase() {
 	var err error
-	db, err = pgx.Connect(context.Background(), "postgres://artemloginov:raw0@localhost:5432/tupochatdb")
+	db, err = pgx.Connect(context.Background(), "postgres://root:pswd@localhost:5432/tupochatdb") // TODO: change to env variables
 	if err != nil {
 		log.Fatal("Failed to conect to database: ", err)
 	}
@@ -169,6 +169,7 @@ func main() {
 				if ok {
 					fmt.Printf("kicked %s\n", client.name)
 					client.conn.Close()
+
 				}
 			} else if strings.TrimSuffix(cmd+msg, "\n") != "" {
 				fmt.Printf("%s server: %s", time.Now().Format("2006-01-02 15:04:05"), cmd+" "+msg)

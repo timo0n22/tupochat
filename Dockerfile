@@ -1,6 +1,6 @@
 FROM golang:1.19.0-alpine3.16 AS builder
 
-WORKDIR /app
+WORKDIR /tupochat
 
 COPY go.mod ./
 COPY go.sum ./
@@ -12,8 +12,8 @@ RUN go build -o tupochat
 
 FROM alpine:3.16
 
-WORKDIR /app
+WORKDIR /tupochat
 
-COPY --from=builder /app/tupochat .
+COPY --from=builder /tupochat .
 
 CMD ["./tupochat"]
