@@ -13,5 +13,5 @@ jobs:
       
       - name: Push to GitLab
         run: |
-          git remote add gitlab https://oauth2:${{ secrets.GITLAB_TOKEN }}@gitlab.com/timo0n22/tupochat.git
+          git remote add gitlab https://oauth2:${{ secrets.GITLAB_TOKEN }}@gitlab.com/dershov173-group/dershov173-project.git
           git push gitlab main --force

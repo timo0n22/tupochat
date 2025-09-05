@@ -26,7 +26,7 @@ type Client struct {
 
 func connectDatabase() {
 	var err error
-	db, err = pgx.Connect(context.Background(), os.Getenv("DATABASE_URL"))
+	db, err = pgx.Connect(context.Background(), "postgres://postgres:raw0@localhost:5432/tupochatdb")
 	if err != nil {
 		log.Fatal("Failed to conect to database: ", err)
 	}
