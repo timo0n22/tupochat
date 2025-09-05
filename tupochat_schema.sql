@@ -18,5 +18,5 @@ CREATE TABLE messages (
 
 INSERT INTO rooms (name, owner) VALUES ('global', NULL);
 
-INSERT INTO clients (username, display_name, password_hash, current_room)
-VALUES ('server', 'server', 'server', 'global');
+INSERT INTO clients (username, password_hash, current_room)
+VALUES ('server', 'server', 'global');
