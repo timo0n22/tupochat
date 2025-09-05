@@ -5,7 +5,6 @@ CREATE TABLE rooms (
 
 CREATE TABLE clients (
     username VARCHAR(20) UNIQUE NOT NULL,
-    display_name VARCHAR(20),
     password_hash VARCHAR(300),
     current_room VARCHAR(20) REFERENCES rooms(name) ON DELETE SET NULL
 );

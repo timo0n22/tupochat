@@ -19,7 +19,6 @@ var db *pgx.Conn
 
 type Client struct {
 	conn     net.Conn
-	login    string
 	name     string
 	pswdHash string
 	curRoom  string
@@ -27,10 +26,11 @@ type Client struct {
 
 func connectDatabase() {
 	var err error
-	db, err = pgx.Connect(context.Background(), "postgres://postgres:raw0@localhost:5432/tupochatdb")
+	db, err = pgx.Connect(context.Background(), "postgres://artemloginov:raw0@localhost:5432/tupochatdb")
 	if err != nil {
 		log.Fatal("Failed to conect to database: ", err)
 	}
+	fmt.Println("Connected to database")
 }
 
 func closeDatabase() {
@@ -39,15 +39,15 @@ func closeDatabase() {
 
 func newClient(name string, pswd string) {
 	var err error
-	_, err = db.Exec(context.Background(), "INSERT INTO clients (username, display_name, password_hash) VALUES ($1, $2, $3)", name, name, pswd)
+	_, err = db.Exec(context.Background(), "INSERT INTO clients (username, password_hash) VALUES ($1, $2)", name, pswd)
 	if err != nil {
 		log.Fatal("Failed to insert client: ", err)
 	}
 }
 
-func getClient(login string) Client {
+func getClient(name string) Client {
 	var client Client
-	err := db.QueryRow(context.Background(), "SELECT username, display_name, password_hash, current_room FROM clients WHERE username = $1", login).Scan(&client.login, &client.name, &client.pswdHash, &client.curRoom)
+	err := db.QueryRow(context.Background(), "SELECT username, password_hash, current_room FROM clients WHERE username = $1", name).Scan(&client.name, &client.pswdHash, &client.curRoom)
 	if err != nil {
 		log.Fatal("Failed to get client: ", err)
 	}
@@ -109,7 +109,7 @@ func parseMessage(msg string) (string, string) {
 
 func distribute(from string, message string, room string) {
 	time := time.Now().Format("2006-01-02 15:04:05")
-	msg := fmt.Sprintf("%s %s: %s\n", time, from, message)
+	msg := fmt.Sprintf("%s -- %s -- %s: %s\n", room, time, from, message)
 	for _, client := range clients {
 		if client.curRoom == room {
 			client.conn.Write([]byte(msg))
@@ -117,9 +117,9 @@ func distribute(from string, message string, room string) {
 	}
 }
 
-func getRoomOwner(name string) (string, error) {
+func checkRoom(name string) (string, error) {
 	var owner string
-	err := db.QueryRow(context.Background(), "SELECT name, owner FROM rooms WHERE name = $1", name).Scan(&owner)
+	err := db.QueryRow(context.Background(), "SELECT owner FROM rooms WHERE name = $1", name).Scan(&owner)
 	if err != nil {
 		return "", err
 	}
@@ -140,33 +140,57 @@ func handleConnection(c Client) {
 			fmt.Printf("client %s exit chat\n", c.name)
 			return
 		}
-		if cmd == "/help" {
-			fmt.Printf("commands:\n/help - this help\n/name - change your name\n/exit - exit chat\n")
+		if cmd == "/help\n" {
+			fmt.Printf("commands:\n/help - this help\n/room - create or join room\n/join - join room\n/leave - leave room\n/deleteRoom - delete room\n/exit - exit chat\n")
 			continue
 		}
 		if cmd == "/room" {
+			var roomExists bool
+			err := db.QueryRow(context.Background(), "SELECT EXISTS( SELECT 1 FROM rooms WHERE name = $1)", msg).Scan(&roomExists)
+			if err != nil {
+				log.Fatal("Failed to check if room exists: ", err)
+			}
+			if roomExists {
+				c.conn.Write([]byte("room " + msg + " already exists\n"))
+				continue
+			}
 			if msg != "" || len(msg) <= 20 {
-				_, err := db.Exec(context.Background(), "INSERT INTO rooms (name, owner) VALUES ($1, $2)", msg, c.login)
+				_, err := db.Exec(context.Background(), "INSERT INTO rooms (name, owner) VALUES ($1, $2)", msg, c.name)
 				if err != nil {
 					log.Fatal("Failed to create room: ", err)
 				}
-				_, err = db.Exec(context.Background(), "UPDATE clients SET current_room = $1 WHERE username = $2", msg, c.login)
+				_, err = db.Exec(context.Background(), "UPDATE clients SET current_room = $1 WHERE username = $2", msg, c.name)
 				if err != nil {
 					log.Fatal("Failed to join room: ", err)
 				}
 				c.curRoom = msg
+				clients[c.name] = c
+				getHistory(c, c.curRoom)
 				fmt.Printf("%s created room %s\n", c.name, msg)
+				c.conn.Write([]byte("created room " + msg + "\n"))
 				continue
 			}
 			c.conn.Write([]byte("room name must be between 1 and 20 characters\n"))
 		}
 		if cmd == "/join" {
+			var roomExists bool
+			err := db.QueryRow(context.Background(), "SELECT EXISTS( SELECT 1 FROM rooms WHERE name = $1)", msg).Scan(&roomExists)
+			if err != nil {
+				log.Fatal("Failed to check if room exists: ", err)
+			}
+			if !roomExists {
+				c.conn.Write([]byte("room " + msg + " does not exist\n"))
+				continue
+			}
 			if msg != "" || len(msg) <= 20 {
-				_, err := db.Exec(context.Background(), "UPDATE clients SET current_room = $1 WHERE username = $2", msg, c.login)
+				_, err := db.Exec(context.Background(), "UPDATE clients SET current_room = $1 WHERE username = $2", msg, c.name)
 				if err != nil {
 					log.Fatal("Failed to join room: ", err)
 				}
 				c.curRoom = msg
+				clients[c.name] = c
+				getHistory(c, c.curRoom)
+				fmt.Printf("%s joined room %s\n", c.name, msg)
 				c.conn.Write([]byte("joined " + msg + "\n"))
 				continue
 			}
@@ -174,11 +198,11 @@ func handleConnection(c Client) {
 		}
 		if cmd == "/deleteRoom" {
 			if msg != "" || len(msg) <= 20 {
-				owner, err := getRoomOwner(msg)
+				owner, err := checkRoom(msg)
 				if err != nil {
 					log.Fatal("Failed to get room: ", err)
 				}
-				if owner != c.login {
+				if owner != c.name {
 					c.conn.Write([]byte("you are not the owner of this room\n"))
 					continue
 				}
@@ -190,26 +214,16 @@ func handleConnection(c Client) {
 				if err != nil {
 					log.Fatal("Failed to delete room: ", err)
 				}
+				c.curRoom = "global"
+				clients[c.name] = c
+				getHistory(c, c.curRoom)
+				fmt.Printf("%s deleted room %s\n", c.name, msg)
 				c.conn.Write([]byte("deleted room " + msg + "\n"))
 				continue
 			}
 			c.conn.Write([]byte("room name must be between 1 and 20 characters\n"))
-		}
-		if cmd == "/name" {
-			if msg != "" || len(msg) <= 20 {
-				c.name = msg
-				clients[c.login] = c
-				_, err := db.Exec(context.Background(), "UPDATE clients SET display_name = $1 WHERE username = $2", msg, c.login)
-				if err != nil {
-					log.Fatal("Failed to update client: ", err)
-				}
-				fmt.Printf("%s changed name to %s\n", c.name, msg)
-				c.conn.Write([]byte("changed name to " + msg + "\n"))
-				continue
-			}
-			c.conn.Write([]byte("name must be between 1 and 20 characters\n"))
 		} else if strings.TrimSuffix(cmd+msg, "\n") != "" {
-			fmt.Printf("%s %s: %s\n", time.Now().Format("2006-01-02 15:04:05"), c.name, cmd+" "+msg)
+			fmt.Printf("%s --%s -- %s: %s\n", c.curRoom, time.Now().Format("2006-01-02 15:04:05"), c.name, cmd+" "+msg)
 			distribute(c.name, cmd+" "+msg, c.curRoom)
 			saveMessage(c.name, cmd+" "+msg, time.Now(), c.curRoom)
 		}
@@ -217,20 +231,19 @@ func handleConnection(c Client) {
 }
 
 func main() {
-	clients["server"] = Client{conn: nil, login: "server", name: "server", pswdHash: "server", curRoom: "global"}
 	ln, _ := net.Listen("tcp", ":5522")
+	serverRoom := "global"
 	connectDatabase()
 	defer closeDatabase()
 	go func() {
 		reader := bufio.NewReader(os.Stdin)
 		for {
-			server := clients["server"]
 			data, _ := reader.ReadString('\n')
 			fmt.Print("\033[1A")
 			fmt.Print("\033[2K")
 			cmd, msg := parseMessage(data)
 			if cmd == "/help" {
-				fmt.Printf("commands:\n/help - this help\n/kick id - kick client with id\n/id name - get id of client with name\n")
+				fmt.Printf("commands:\n/help - this help\n/kick id - kick client with id\n")
 				continue
 			}
 			if cmd == "/kick" {
@@ -242,8 +255,8 @@ func main() {
 				}
 			} else if strings.TrimSuffix(cmd+msg, "\n") != "" {
 				fmt.Printf("%s server: %s", time.Now().Format("2006-01-02 15:04:05"), cmd+" "+msg)
-				saveMessage("server", strings.TrimSuffix(cmd+" "+msg, "\n"), time.Now(), server.curRoom)
-				distribute("server", strings.TrimSuffix(cmd+" "+msg, "\n"), server.curRoom)
+				saveMessage("server", strings.TrimSuffix(cmd+" "+msg, "\n"), time.Now(), serverRoom)
+				distribute("server", strings.TrimSuffix(cmd+" "+msg, "\n"), serverRoom)
 			}
 		}
 	}()
@@ -309,9 +322,10 @@ func main() {
 					if confirm == pswd {
 						sh.Write([]byte(pswd))
 						hash := hex.EncodeToString(sh.Sum(nil))
-						clients[login] = Client{conn, login, login, hash, "global"}
+						clients[login] = Client{conn, login, hash, "global"}
 						newClient(login, hash)
-						go handleConnection(Client{conn, login, login, hash, "global"})
+						getHistory(Client{conn, login, hash, "global"}, "global")
+						go handleConnection(Client{conn, login, hash, "global"})
 						break
 					}
 				}
@@ -320,9 +334,10 @@ func main() {
 			}
 			sh.Write([]byte(pswd))
 			hash := hex.EncodeToString(sh.Sum(nil))
-			clients[login] = Client{conn, login, login, hash, "global"}
+			clients[login] = Client{conn, login, hash, "global"}
 			newClient(login, hash)
-			go handleConnection(Client{conn, login, login, hash, "global"})
+			getHistory(Client{conn, login, hash, "global"}, "global")
+			go handleConnection(Client{conn, login, hash, "global"})
 		}
 	}
 }
