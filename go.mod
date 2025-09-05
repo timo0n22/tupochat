@@ -1,6 +1,8 @@
 module tupochat
 
-go 1.22
+go 1.23.0
+
+toolchain go1.24.2
 
 require github.com/jackc/pgx/v5 v5.7.5
 
