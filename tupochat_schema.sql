@@ -14,7 +14,7 @@ CREATE TABLE messages (
 
 CREATE TABLE rooms (
     name VARCHAR(20) UNIQUE NOT NULL,
-    owner VARCHAR(20) REFERENCES clients (username) ON DELETE SET NULL
+    owner VARCHAR(20)
 );
 
 INSERT INTO clients (username, display_name, password_hash, current_room) VALUES ('server', 'server', 'server', 'global');
