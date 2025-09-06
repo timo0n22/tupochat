@@ -5,10 +5,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"flag"
 	"fmt"
 	"log"
 	"net"
-	"flag"
 	"os"
 	"strings"
 	"time"
@@ -26,9 +26,9 @@ type Client struct {
 }
 
 func connectDatabase(test bool) {
-	var err error	
+	var err error
 	if test {
-		db, err = pgx.Connect(context.Background(), "postgres://artemloginov:raw0@localhost:5432/tupochatdb")
+		db, err = pgx.Connect(context.Background(), "postgres://test:pass@localhost:5432/tupochatdb")
 		if err != nil {
 			log.Fatal("Failed to conect to database: ", err)
 		}
@@ -149,7 +149,18 @@ func handleConnection(c Client) {
 			return
 		}
 		if cmd == "/help\n" {
-			fmt.Printf("commands:\n/help - this help\n/room - create or join room\n/join - join room\n/leave - leave room\n/deleteRoom - delete room\n/exit - exit chat\n")
+			c.conn.Write([]byte("commands:\n/room - create and join room\n/join - join room\n/deleteRoom - delete room\n/list - list rooms\n/exit - exit chat\n"))
+			continue
+		}
+		if cmd == "/list" {
+			var rooms []string
+			err := db.QueryRow(context.Background(), "SELECT name FROM rooms").Scan(&rooms)
+			if err != nil {
+				log.Fatal("Failed to get rooms: ", err)
+			}
+			for _, room := range rooms {
+				fmt.Printf("%s\n", room)
+			}
 			continue
 		}
 		if cmd == "/room" {
@@ -292,6 +303,7 @@ func main() {
 				client.conn = conn
 				clients[login] = client
 				getHistory(client, client.curRoom)
+				conn.Write([]byte("welcome to tupochat! type /help to see commands\n"))
 				go handleConnection(client)
 			} else {
 				conn.Write([]byte("password is incorrect\n"))
@@ -306,6 +318,7 @@ func main() {
 						client.conn = conn
 						clients[login] = client
 						getHistory(client, client.curRoom)
+						conn.Write([]byte("welcome to tupochat! type /help to see commands\n"))
 						go handleConnection(client)
 						break
 					}
@@ -335,6 +348,7 @@ func main() {
 						clients[login] = Client{conn, login, hash, "global"}
 						newClient(login, hash)
 						getHistory(Client{conn, login, hash, "global"}, "global")
+						conn.Write([]byte("welcome to tupochat! type /help to see commands\n"))
 						go handleConnection(Client{conn, login, hash, "global"})
 						break
 					}
@@ -347,6 +361,7 @@ func main() {
 			clients[login] = Client{conn, login, hash, "global"}
 			newClient(login, hash)
 			getHistory(Client{conn, login, hash, "global"}, "global")
+			conn.Write([]byte("welcome to tupochat! type /help to see commands\n"))
 			go handleConnection(Client{conn, login, hash, "global"})
 		}
 	}
