@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"flag"
 	"os"
 	"strings"
 	"time"
@@ -24,11 +25,18 @@ type Client struct {
 	curRoom  string
 }
 
-func connectDatabase() {
-	var err error
-	db, err = pgx.Connect(context.Background(), "postgres://postgres:raw0@localhost:5432/tupochatdb")
-	if err != nil {
-		log.Fatal("Failed to conect to database: ", err)
+func connectDatabase(test bool) {
+	var err error	
+	if test {
+		db, err = pgx.Connect(context.Background(), "postgres://artemloginov:raw0@localhost:5432/tupochatdb")
+		if err != nil {
+			log.Fatal("Failed to conect to database: ", err)
+		}
+	} else {
+		db, err = pgx.Connect(context.Background(), "postgres://postgres:raw0@localhost:5432/tupochatdb")
+		if err != nil {
+			log.Fatal("Failed to conect to database: ", err)
+		}
 	}
 	fmt.Println("Connected to database")
 }
@@ -232,8 +240,10 @@ func handleConnection(c Client) {
 
 func main() {
 	ln, _ := net.Listen("tcp", ":5522")
+	testPtr := flag.Bool("test", false, "test")
+	flag.Parse()
 	serverRoom := "global"
-	connectDatabase()
+	connectDatabase(*testPtr)
 	defer closeDatabase()
 	go func() {
 		reader := bufio.NewReader(os.Stdin)
