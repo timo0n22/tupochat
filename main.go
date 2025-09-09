@@ -57,13 +57,13 @@ func newClient(name string, pswd string) {
 	}
 }
 
-func getClient(name string) (Client, error) {
+func getClient(name string) Client {
 	var client Client
 	err := db.QueryRow(context.Background(), "SELECT username, password_hash, current_room FROM clients WHERE username = $1", name).Scan(&client.name, &client.pswdHash, &client.curRoom)
 	if err != nil {
 		log.Fatal("Failed to get client: ", err)
 	}
-	return client, err
+	return client
 }
 
 func saveMessage(from string, message string, time time.Time, room string) {
@@ -166,12 +166,6 @@ func handleConnection(c Client) {
 		}
 
 		cmd, msg := parseMessage(strings.TrimSuffix(data, "\n"))
-		client, err := getClient(strings.TrimPrefix(cmd, "/"))
-
-		if err == nil && cmd == client.name {
-			client.conn.Write([]byte(msg))
-			continue
-		}
 
 		if cmd == "/exit\n" {
 			fmt.Printf("client %s exit chat\n", c.name)
@@ -313,7 +307,7 @@ func main() {
 		}
 
 		if registered {
-			client, _ := getClient(login)
+			client := getClient(login)
 			conn.Write([]byte("password:\n"))
 			pswd, _ := bufio.NewReader(conn).ReadString('\n')
 			pswd = strings.TrimSuffix(pswd, "\n")
