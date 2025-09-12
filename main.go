@@ -57,13 +57,13 @@ func newClient(name string, pswd string) {
 	}
 }
 
-func getClient(name string) Client {
+func getClient(name string) (Client, error) {
 	var client Client
 	err := db.QueryRow(context.Background(), "SELECT username, password_hash, current_room FROM clients WHERE username = $1", name).Scan(&client.name, &client.pswdHash, &client.curRoom)
 	if err != nil {
-		log.Fatal("Failed to get client: ", err)
+		log.Println("Failed to get client: ", err)
 	}
-	return client
+	return client, err
 }
 
 func saveMessage(from string, message string, time time.Time, room string) {
@@ -96,6 +96,10 @@ func newRoom(name string, owner string) (string, error) {
 	_, err = db.Exec(context.Background(), "INSERT INTO rooms (name, owner) VALUES ($1, $2)", name, owner)
 	if err != nil {
 		log.Fatal("Failed to create room: ", err)
+	}
+	_, err = db.Exec(context.Background(), "UPDATE clients SET current_room = $1 WHERE username = $2", name, owner)
+	if err != nil {
+		log.Fatal("Failed to join room: ", err)
 	}
 	return "created room " + name + "\n", nil
 }
@@ -177,7 +181,7 @@ func handleConnection(c Client) {
 			continue
 		}
 
-		if cmd == "/list" {
+		if cmd == "/list\n" {
 			var rooms []string
 			err := db.QueryRow(context.Background(), "SELECT name FROM rooms").Scan(&rooms)
 			if err != nil {
@@ -194,18 +198,13 @@ func handleConnection(c Client) {
 				c.conn.Write([]byte("room name must be between 1 and 20 characters\n"))
 				continue
 			}
-			_, err = db.Exec(context.Background(), "UPDATE clients SET current_room = $1 WHERE username = $2", msg, c.name)
-			if err != nil {
-				log.Fatal("Failed to join room: ", err)
-			}
 			result, err := newRoom(msg, c.name)
-			if err != nil {
-				c.conn.Write([]byte(result))
-				continue
+			if err == nil {
+				c.curRoom = msg
+				clients[c.name] = c
 			}
+			fmt.Println(result)
 			c.conn.Write([]byte(result))
-			c.curRoom = msg
-			clients[c.name] = c
 			continue
 		}
 
@@ -299,15 +298,9 @@ func main() {
 		conn.Write([]byte("login:\n"))
 		login, _ := bufio.NewReader(conn).ReadString('\n')
 		login = strings.TrimSuffix(login, "\n")
+		client, err := getClient(login)
 
-		var registered bool
-		err := db.QueryRow(context.Background(), "SELECT EXISTS( SELECT 1 FROM clients WHERE username = $1)", login).Scan(&registered)
-		if err != nil {
-			log.Fatal("Failed to check if user is registered: ", err)
-		}
-
-		if registered {
-			client := getClient(login)
+		if err == nil {
 			conn.Write([]byte("password:\n"))
 			pswd, _ := bufio.NewReader(conn).ReadString('\n')
 			pswd = strings.TrimSuffix(pswd, "\n")
