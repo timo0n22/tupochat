@@ -138,6 +138,45 @@ func getHistory(client Client, room string) {
 	}
 }
 
+func listRooms() ([]string, error) {
+	var rooms []string
+	err := db.QueryRow(context.Background(),
+		"SELECT name FROM rooms").Scan(&rooms)
+	if err != nil {
+		log.Fatal("Failed to get rooms: ", err)
+		return nil, err
+	}
+	return rooms, nil
+}
+
+func roomExists(name string) bool {
+	var roomExists bool
+	err := db.QueryRow(context.Background(), "SELECT EXISTS( SELECT 1 FROM rooms WHERE name = $1)", name).Scan(&roomExists)
+	if err != nil {
+		log.Fatal("Failed to check if room exists: ", err)
+		//todo return error instead of fatal exit
+	}
+	return roomExists
+}
+
+func joinRoom(name string, room string) {
+	_, err := db.Exec(context.Background(), "UPDATE clients SET current_room = $1 WHERE username = $2", room, name)
+	if err != nil {
+		log.Fatal("Failed to join room: ", err)
+	}
+}
+
+func deleteRoom(name string) {
+	_, err := db.Exec(context.Background(), "UPDATE clients SET current_room = 'global' WHERE current_room = $1", name)
+	if err != nil {
+		log.Fatal("Failed to delete room in clients: ", err)
+	}
+	_, err = db.Exec(context.Background(), "DELETE FROM rooms WHERE name = $1", name)
+	if err != nil {
+		log.Fatal("Failed to delete room: ", err)
+	}
+}
+
 func parseMessage(msg string) (string, string) {
 	split := strings.Split(msg, " ")
 
@@ -182,10 +221,9 @@ func handleConnection(c Client) {
 		}
 
 		if cmd == "/list\n" {
-			var rooms []string
-			err := db.QueryRow(context.Background(), "SELECT name FROM rooms").Scan(&rooms)
+			rooms, err := listRooms()
 			if err != nil {
-				log.Fatal("Failed to get rooms: ", err)
+				log.Fatal("Failed to list rooms: ", err)
 			}
 			for _, room := range rooms {
 				c.conn.Write([]byte(room + "\n"))
@@ -196,6 +234,10 @@ func handleConnection(c Client) {
 		if cmd == "/room" {
 			if msg == "" || len(msg) > 20 {
 				c.conn.Write([]byte("room name must be between 1 and 20 characters\n"))
+				continue
+			}
+			if roomExists(msg) {
+				c.conn.Write([]byte("room " + msg + " already exists\n"))
 				continue
 			}
 			result, err := newRoom(msg, c.name)
@@ -212,19 +254,11 @@ func handleConnection(c Client) {
 			if msg == "" || len(msg) > 20 {
 				c.conn.Write([]byte("room name must be between 1 and 20 characters\n"))
 			}
-			var roomExists bool
-			err := db.QueryRow(context.Background(), "SELECT EXISTS( SELECT 1 FROM rooms WHERE name = $1)", msg).Scan(&roomExists)
-			if err != nil {
-				log.Fatal("Failed to check if room exists: ", err)
-			}
-			if !roomExists {
+			if !roomExists(msg) {
 				c.conn.Write([]byte("room " + msg + " does not exist\n"))
 				continue
 			}
-			_, err = db.Exec(context.Background(), "UPDATE clients SET current_room = $1 WHERE username = $2", msg, c.name)
-			if err != nil {
-				log.Fatal("Failed to join room: ", err)
-			}
+			joinRoom(c.name, msg)
 			c.curRoom = msg
 			clients[c.name] = c
 			getHistory(c, c.curRoom)
@@ -237,6 +271,10 @@ func handleConnection(c Client) {
 			if msg == "" || len(msg) > 20 {
 				c.conn.Write([]byte("room name must be between 1 and 20 characters\n"))
 			}
+			if !roomExists(msg) {
+				c.conn.Write([]byte("room " + msg + " does not exist\n"))
+				continue
+			}
 			owner, err := checkRoom(msg)
 			if err != nil {
 				log.Fatal("Failed to get room: ", err)
@@ -245,14 +283,8 @@ func handleConnection(c Client) {
 				c.conn.Write([]byte("you are not the owner of this room\n"))
 				continue
 			}
-			_, err = db.Exec(context.Background(), "UPDATE clients SET current_room = 'global' WHERE current_room = $1", msg)
-			if err != nil {
-				log.Fatal("Failed to delete room in clients: ", err)
-			}
-			_, err = db.Exec(context.Background(), "DELETE FROM rooms WHERE name = $1", msg)
-			if err != nil {
-				log.Fatal("Failed to delete room: ", err)
-			}
+			joinRoom(c.name, "global")
+			deleteRoom(msg)
 			c.curRoom = "global"
 			clients[c.name] = c
 			getHistory(c, c.curRoom)
