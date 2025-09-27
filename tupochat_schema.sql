@@ -1,3 +1,7 @@
+DROP TABLE IF EXISTS rooms;
+DROP TABLE IF EXISTS clients;
+DROP TABLE IF EXISTS messages;
+
 CREATE TABLE rooms (
     name VARCHAR(20) UNIQUE NOT NULL,
     owner VARCHAR(20)
