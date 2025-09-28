@@ -53,7 +53,7 @@ func newClient(name string, pswd string) {
 	var err error
 	_, err = db.Exec(context.Background(), "INSERT INTO clients (username, password_hash) VALUES ($1, $2)", name, pswd)
 	if err != nil {
-		log.Fatal("Failed to insert client: ", err)
+		log.Println("Failed to insert client: ", err)
 	}
 }
 
@@ -71,14 +71,15 @@ func saveMessage(from string, message string, time time.Time, room string) {
 	timestamp := time.Format("2006-01-02 15:04:05")
 	_, err = db.Exec(context.Background(), "INSERT INTO messages (sender, content, sent_at, room) VALUES ($1, $2, $3, $4)", from, message, timestamp, room)
 	if err != nil {
-		log.Fatal("Failed to insert message: ", err)
+		log.Println("Failed to insert message: ", err)
 	}
 }
 
-func checkRoom(name string) (string, error) {
+func checkRoomOwner(name string) (string, error) {
 	var owner string
 	err := db.QueryRow(context.Background(), "SELECT owner FROM rooms WHERE name = $1", name).Scan(&owner)
 	if err != nil {
+		log.Println("Failed to check room owner: ", err)
 		return "", err
 	}
 	return owner, nil
@@ -88,18 +89,18 @@ func newRoom(name string, owner string) (string, error) {
 	var exists bool
 	err := db.QueryRow(context.Background(), "SELECT EXISTS( SELECT 1 FROM rooms WHERE name = $1)", name).Scan(&exists)
 	if err != nil {
-		log.Fatal("Failed to check if room exists: ", err)
+		log.Println("Failed to check if room exists: ", err)
 	}
 	if exists {
 		return "room " + name + " already exists\n", err
 	}
 	_, err = db.Exec(context.Background(), "INSERT INTO rooms (name, owner) VALUES ($1, $2)", name, owner)
 	if err != nil {
-		log.Fatal("Failed to create room: ", err)
+		log.Println("Failed to create room: ", err)
 	}
 	_, err = db.Exec(context.Background(), "UPDATE clients SET current_room = $1 WHERE username = $2", name, owner)
 	if err != nil {
-		log.Fatal("Failed to join room: ", err)
+		log.Println("Failed to join room: ", err)
 	}
 	return "created room " + name + "\n", nil
 }
@@ -108,7 +109,7 @@ func getHistory(client Client, room string) {
 	rows, err := db.Query(context.Background(),
 		"SELECT content, sent_at, sender FROM messages WHERE room = $1 ORDER BY sent_at ASC LIMIT 500", room)
 	if err != nil {
-		log.Fatal("Failed to get history: ", err)
+		log.Println("Failed to get history: ", err)
 	}
 	defer rows.Close()
 
@@ -130,7 +131,7 @@ func getHistory(client Client, room string) {
 	}
 
 	if err := rows.Err(); err != nil {
-		log.Fatal("Row iteration error: ", err)
+		log.Println("Row iteration error: ", err)
 	}
 
 	for i, msg := range history {
@@ -143,7 +144,7 @@ func listRooms() ([]string, error) {
 	err := db.QueryRow(context.Background(),
 		"SELECT name FROM rooms").Scan(&rooms)
 	if err != nil {
-		log.Fatal("Failed to get rooms: ", err)
+		log.Println("Failed to get rooms: ", err)
 		return nil, err
 	}
 	return rooms, nil
@@ -153,7 +154,7 @@ func roomExists(name string) bool {
 	var roomExists bool
 	err := db.QueryRow(context.Background(), "SELECT EXISTS( SELECT 1 FROM rooms WHERE name = $1)", name).Scan(&roomExists)
 	if err != nil {
-		log.Fatal("Failed to check if room exists: ", err)
+		log.Println("Failed to check if room exists: ", err)
 		//todo return error instead of fatal exit
 	}
 	return roomExists
@@ -162,18 +163,18 @@ func roomExists(name string) bool {
 func joinRoom(name string, room string) {
 	_, err := db.Exec(context.Background(), "UPDATE clients SET current_room = $1 WHERE username = $2", room, name)
 	if err != nil {
-		log.Fatal("Failed to join room: ", err)
+		log.Println("Failed to join room: ", err)
 	}
 }
 
 func deleteRoom(name string) {
 	_, err := db.Exec(context.Background(), "UPDATE clients SET current_room = 'global' WHERE current_room = $1", name)
 	if err != nil {
-		log.Fatal("Failed to delete room in clients: ", err)
+		log.Println("Failed to delete room in clients: ", err)
 	}
 	_, err = db.Exec(context.Background(), "DELETE FROM rooms WHERE name = $1", name)
 	if err != nil {
-		log.Fatal("Failed to delete room: ", err)
+		log.Println("Failed to delete room: ", err)
 	}
 }
 
@@ -223,7 +224,7 @@ func handleConnection(c Client) {
 		if cmd == "/list\n" {
 			rooms, err := listRooms()
 			if err != nil {
-				log.Fatal("Failed to list rooms: ", err)
+				log.Println("Failed to list rooms: ", err)
 			}
 			for _, room := range rooms {
 				c.conn.Write([]byte(room + "\n"))
@@ -275,9 +276,9 @@ func handleConnection(c Client) {
 				c.conn.Write([]byte("room " + msg + " does not exist\n"))
 				continue
 			}
-			owner, err := checkRoom(msg)
+			owner, err := checkRoomOwner(msg)
 			if err != nil {
-				log.Fatal("Failed to get room: ", err)
+				log.Println("Failed to get room: ", err)
 			}
 			if owner != c.name {
 				c.conn.Write([]byte("you are not the owner of this room\n"))
