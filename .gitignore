@@ -21,8 +21,20 @@
 go.work
 go.work.sum
 
-# env file
-.env
-
 # MacOS files
 .DS_Store
+
+# claude
+CLAUDE.md
+
+# env
+.env
+.env.local
+.env.*.local
+
+# Binary
+tupochat
+
+# Coverage
+coverage.out
+coverage.html
