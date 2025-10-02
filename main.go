@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -16,8 +15,14 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+type Config struct {
+	DatabaseURL string
+	ServerPort  string
+}
+
 var db *pgx.Conn
 var clients = make(map[string]Client)
+var config Config
 
 type Client struct {
 	conn     net.Conn
@@ -26,23 +31,32 @@ type Client struct {
 	curRoom  string
 }
 
-func connectDatabase(test bool) {
+func loadConfig() Config {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "postgres://postgres:raw0@localhost:5432/tupochatdb"
+		log.Println("WARNING: DATABASE_URL not set, using default:", dbURL)
+	}
+
+	port := os.Getenv("SERVER_PORT")
+	if port == "" {
+		port = "5522"
+	}
+
+	return Config{
+		DatabaseURL: dbURL,
+		ServerPort:  port,
+	}
+}
+
+func connectDatabase() error {
 	var err error
-
-	if test {
-		db, err = pgx.Connect(context.Background(), "postgres://test:pass@localhost:5432/tupochatdb")
-		if err != nil {
-			log.Fatal("Failed to conect to database: ", err)
-		}
-		fmt.Println("Connected to test database")
-		return
-	}
-
-	db, err = pgx.Connect(context.Background(), "postgres://postgres:raw0@localhost:5432/tupochatdb")
+	db, err = pgx.Connect(context.Background(), config.DatabaseURL)
 	if err != nil {
-		log.Fatal("Failed to conect to database: ", err)
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
-	fmt.Println("Connected to database")
+	log.Println("Connected to database")
+	return nil
 }
 
 func closeDatabase() {
@@ -301,12 +315,19 @@ func handleConnection(c Client) {
 }
 
 func main() {
-	ln, _ := net.Listen("tcp", ":5522")
-	testPtr := flag.Bool("test", false, "test")
-	flag.Parse()
+	ln, err := net.Listen("tcp", ":"+config.ServerPort)
+	if err != nil {
+		log.Fatal("Failed to start server:", err)
+	}
+	defer ln.Close()
+
 	serverRoom := "global"
 
-	connectDatabase(*testPtr)
+	config = loadConfig()
+	if err := connectDatabase(); err != nil {
+		log.Fatal(err)
+	}
+
 	defer closeDatabase()
 
 	go func() {
