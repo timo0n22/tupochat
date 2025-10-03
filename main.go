@@ -9,8 +9,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -340,6 +342,23 @@ func main() {
 	}
 
 	defer closeDatabase()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		log.Println("\nShutting down...")
+		ln.Close()
+		mu.Lock()
+		for _, client := range clients {
+			client.conn.Write([]byte("Server is shutting down\n"))
+			client.conn.Close()
+		}
+		mu.Unlock()
+		closeDatabase()
+		os.Exit(0)
+	}()
 
 	go func() {
 		reader := bufio.NewReader(os.Stdin)
