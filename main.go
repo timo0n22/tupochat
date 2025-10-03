@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -23,6 +24,7 @@ type Config struct {
 var db *pgx.Conn
 var clients = make(map[string]Client)
 var config Config
+var mu sync.RWMutex
 
 type Client struct {
 	conn     net.Conn
@@ -203,11 +205,13 @@ func distribute(from string, message string, room string) {
 	time := time.Now().Format("2006-01-02 15:04:05")
 	msg := fmt.Sprintf("%s -- %s -- %s: %s\n", room, time, from, message)
 
+	mu.RLock()
 	for _, client := range clients {
 		if client.curRoom == room {
 			client.conn.Write([]byte(msg))
 		}
 	}
+	mu.RUnlock()
 }
 
 func handleConnection(c Client) {
@@ -262,7 +266,9 @@ func handleConnection(c Client) {
 				continue
 			}
 			c.curRoom = msg
+			mu.Lock()
 			clients[c.name] = c
+			mu.Unlock()
 			c.conn.Write([]byte(result))
 
 		case "/join":
@@ -280,7 +286,9 @@ func handleConnection(c Client) {
 				continue
 			}
 			c.curRoom = msg
+			mu.Lock()
 			clients[c.name] = c
+			mu.Unlock()
 			getHistory(c, c.curRoom)
 			c.conn.Write([]byte("Joined " + msg + "\n"))
 
@@ -301,7 +309,9 @@ func handleConnection(c Client) {
 			}
 			deleteRoom(msg)
 			c.curRoom = "global"
+			mu.Lock()
 			clients[c.name] = c
+			mu.Unlock()
 			getHistory(c, c.curRoom)
 			c.conn.Write([]byte("Deleted room " + msg + "\n"))
 
@@ -364,7 +374,9 @@ func main() {
 			hash := hex.EncodeToString(sh.Sum(nil))
 			if hash == client.pswdHash {
 				client.conn = conn
+				mu.Lock()
 				clients[login] = client
+				mu.Unlock()
 				getHistory(client, client.curRoom)
 				conn.Write([]byte("welcome to tupochat! type /help to see commands\n"))
 				go handleConnection(client)
@@ -379,7 +391,9 @@ func main() {
 					hash := hex.EncodeToString(sh.Sum(nil))
 					if hash == client.pswdHash {
 						client.conn = conn
+						mu.Lock()
 						clients[login] = client
+						mu.Unlock()
 						getHistory(client, client.curRoom)
 						conn.Write([]byte("welcome to tupochat! type /help to see commands\n"))
 						go handleConnection(client)
@@ -408,7 +422,9 @@ func main() {
 					if confirm == pswd {
 						sh.Write([]byte(pswd))
 						hash := hex.EncodeToString(sh.Sum(nil))
+						mu.Lock()
 						clients[login] = Client{conn, login, hash, "global"}
+						mu.Unlock()
 						newClient(login, hash)
 						getHistory(Client{conn, login, hash, "global"}, "global")
 						conn.Write([]byte("welcome to tupochat! type /help to see commands\n"))
@@ -421,7 +437,9 @@ func main() {
 			}
 			sh.Write([]byte(pswd))
 			hash := hex.EncodeToString(sh.Sum(nil))
+			mu.Lock()
 			clients[login] = Client{conn, login, hash, "global"}
+			mu.Unlock()
 			newClient(login, hash)
 			getHistory(Client{conn, login, hash, "global"}, "global")
 			conn.Write([]byte("welcome to tupochat! type /help to see commands\n"))
