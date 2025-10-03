@@ -334,9 +334,8 @@ func main() {
 	}
 	defer ln.Close()
 
-	serverRoom := "global"
-
 	config = loadConfig()
+
 	if err := connectDatabase(); err != nil {
 		log.Fatal(err)
 	}
@@ -360,109 +359,126 @@ func main() {
 		os.Exit(0)
 	}()
 
-	go func() {
-		reader := bufio.NewReader(os.Stdin)
-		for {
-			data, _ := reader.ReadString('\n')
-			fmt.Print("\033[1A")
-			fmt.Print("\033[2K")
-			cmd, msg := parseMessage(data)
-			if cmd == "/help" {
-				fmt.Printf("commands:\n/help - this help\n")
-				continue
-			} else if strings.TrimSuffix(cmd+msg, "\n") != "" {
-				fmt.Printf("%s server: %s", time.Now().Format("2006-01-02 15:04:05"), cmd+" "+msg)
-				saveMessage("server", strings.TrimSuffix(cmd+" "+msg, "\n"), time.Now(), serverRoom)
-				distribute("server", strings.TrimSuffix(cmd+" "+msg, "\n"), serverRoom)
-			}
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			log.Printf("Error accepting connection: %v", err)
+			continue
+		}
+		go handleAuth(conn)
+	}
+}
+
+func handleAuth(conn net.Conn) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Panic in auth: %v", r)
+			conn.Close()
 		}
 	}()
-	for {
-		conn, _ := ln.Accept()
-		conn.Write([]byte("login:\n"))
-		login, _ := bufio.NewReader(conn).ReadString('\n')
-		login = strings.TrimSuffix(login, "\n")
-		client, err := getClient(login)
 
-		if err == nil {
-			conn.Write([]byte("password:\n"))
-			pswd, _ := bufio.NewReader(conn).ReadString('\n')
-			pswd = strings.TrimSuffix(pswd, "\n")
-			sh := sha256.New()
-			sh.Write([]byte(pswd))
-			hash := hex.EncodeToString(sh.Sum(nil))
-			if hash == client.pswdHash {
-				client.conn = conn
-				mu.Lock()
-				clients[login] = client
-				mu.Unlock()
-				getHistory(client, client.curRoom)
-				conn.Write([]byte("welcome to tupochat! type /help to see commands\n"))
-				go handleConnection(client)
-			} else {
-				conn.Write([]byte("password is incorrect\n"))
-				for i := 0; i < 2; i++ {
-					conn.Write([]byte("try again\n"))
-					conn.Write([]byte("password:\n"))
-					pswd, _ := bufio.NewReader(conn).ReadString('\n')
-					pswd = strings.TrimSuffix(pswd, "\n")
-					sh.Write([]byte(pswd))
-					hash := hex.EncodeToString(sh.Sum(nil))
-					if hash == client.pswdHash {
-						client.conn = conn
-						mu.Lock()
-						clients[login] = client
-						mu.Unlock()
-						getHistory(client, client.curRoom)
-						conn.Write([]byte("welcome to tupochat! type /help to see commands\n"))
-						go handleConnection(client)
-						break
-					}
-				}
-				conn.Write([]byte("connection closed\n"))
-				conn.Close()
-				continue
-			}
-		} else {
-			conn.Write([]byte("login not found, creating new user\n"))
-			conn.Write([]byte("password:\n"))
-			pswd, _ := bufio.NewReader(conn).ReadString('\n')
-			pswd = strings.TrimSuffix(pswd, "\n")
-			sh := sha256.New()
-			conn.Write([]byte("confirm password:\n"))
-			confirm, _ := bufio.NewReader(conn).ReadString('\n')
-			confirm = strings.TrimSuffix(confirm, "\n")
-			if confirm != pswd {
-				conn.Write([]byte("passwords do not match, try again\n"))
-				for i := 0; i < 2; i++ {
-					conn.Write([]byte("confirm password:\n"))
-					confirm, _ := bufio.NewReader(conn).ReadString('\n')
-					confirm = strings.TrimSuffix(confirm, "\n")
-					if confirm == pswd {
-						sh.Write([]byte(pswd))
-						hash := hex.EncodeToString(sh.Sum(nil))
-						mu.Lock()
-						clients[login] = Client{conn, login, hash, "global"}
-						mu.Unlock()
-						newClient(login, hash)
-						getHistory(Client{conn, login, hash, "global"}, "global")
-						conn.Write([]byte("welcome to tupochat! type /help to see commands\n"))
-						go handleConnection(Client{conn, login, hash, "global"})
-						break
-					}
-				}
-				conn.Close()
-				continue
-			}
-			sh.Write([]byte(pswd))
-			hash := hex.EncodeToString(sh.Sum(nil))
-			mu.Lock()
-			clients[login] = Client{conn, login, hash, "global"}
-			mu.Unlock()
-			newClient(login, hash)
-			getHistory(Client{conn, login, hash, "global"}, "global")
-			conn.Write([]byte("welcome to tupochat! type /help to see commands\n"))
-			go handleConnection(Client{conn, login, hash, "global"})
+	conn.Write([]byte("Login: "))
+	login, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		conn.Close()
+		return
+	}
+	login = strings.TrimSpace(login)
+
+	client, err := getClient(login)
+
+	if err == nil {
+		// Existing user
+		if !authenticateUser(conn, &client) {
+			conn.Close()
+			return
+		}
+		mu.Lock()
+		clients[login] = client
+		mu.Unlock()
+		getHistory(client, client.curRoom)
+		conn.Write([]byte("Welcome back to tupochat! Type /help for commands\n"))
+		log.Printf("%s logged in", login)
+		go handleConnection(client)
+	} else {
+		// New user
+		if !registerUser(conn, login) {
+			conn.Close()
+			return
 		}
 	}
+}
+
+func authenticateUser(conn net.Conn, client *Client) bool {
+	for attempts := 0; attempts < 3; attempts++ {
+		conn.Write([]byte("Password: "))
+		pswd, err := bufio.NewReader(conn).ReadString('\n')
+		if err != nil {
+			return false
+		}
+		pswd = strings.TrimSpace(pswd)
+
+		hash := hashPassword(pswd)
+		if hash == client.pswdHash {
+			client.conn = conn
+			return true
+		}
+
+		if attempts < 2 {
+			conn.Write([]byte("Incorrect password. Try again.\n"))
+		}
+	}
+	conn.Write([]byte("Too many failed attempts\n"))
+	return false
+}
+
+func registerUser(conn net.Conn, login string) bool {
+	conn.Write([]byte("Creating new account\n"))
+	conn.Write([]byte("Password: "))
+	pswd, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return false
+	}
+	pswd = strings.TrimSpace(pswd)
+
+	for attempts := 0; attempts < 3; attempts++ {
+		conn.Write([]byte("Confirm password: "))
+		confirm, err := bufio.NewReader(conn).ReadString('\n')
+		if err != nil {
+			return false
+		}
+		confirm = strings.TrimSpace(confirm)
+
+		if confirm == pswd {
+			hash := hashPassword(pswd)
+			client := Client{conn, login, hash, "global"}
+
+			if err := newClient(login, hash); err != nil {
+				conn.Write([]byte("Error creating account\n"))
+				return false
+			}
+
+			mu.Lock()
+			clients[login] = client
+			mu.Unlock()
+
+			getHistory(client, "global")
+			conn.Write([]byte("Welcome to tupochat! Type /help for commands\n"))
+			log.Printf("New user registered: %s", login)
+			go handleConnection(client)
+			return true
+		}
+
+		if attempts < 2 {
+			conn.Write([]byte("Passwords don't match. Try again.\n"))
+		}
+	}
+	conn.Write([]byte("Too many failed attempts\n"))
+	return false
+}
+
+func hashPassword(pswd string) string {
+	h := sha256.New()
+	h.Write([]byte(pswd))
+	return hex.EncodeToString(h.Sum(nil))
 }
