@@ -1,23 +1,48 @@
-version: '3.9'
-
 services:
   db:
-    image: postgres:16
+    image: postgres:16-alpine
+    container_name: tupochat-db
     environment:
-      POSTGRES_USER: root
-      POSTGRES_PASSWORD: pswd
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-raw0}
       POSTGRES_DB: tupochatdb
     ports:
       - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
+      - ./tupochat_schema.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tupochat-network
 
   chat:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tupochat-server
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
-      DATABASE_URL: postgres://root:pswd@db:5432/tupochatdb
+      DATABASE_URL: postgres://postgres:${DB_PASSWORD:-raw0}@db:5432/tupochatdb
+      SERVER_PORT: "5522"
     ports:
       - "5522:5522"
     restart: unless-stopped
+    networks:
+      - tupochat-network
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 5522 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+    db_data:
+      driver: local
+networks:
+    tupochat-network:
+      driver: bridge
