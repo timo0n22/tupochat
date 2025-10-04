@@ -328,11 +328,6 @@ func handleConnection(c Client) {
 }
 
 func main() {
-	ln, err := net.Listen("tcp", ":"+config.ServerPort)
-	if err != nil {
-		log.Fatal("Failed to start server:", err)
-	}
-	defer ln.Close()
 
 	config = loadConfig()
 
@@ -341,6 +336,12 @@ func main() {
 	}
 
 	defer closeDatabase()
+
+	ln, err := net.Listen("tcp", ":"+config.ServerPort)
+	if err != nil {
+		log.Fatal("Failed to start server:", err)
+	}
+	defer ln.Close()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
