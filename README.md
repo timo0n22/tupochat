@@ -18,11 +18,11 @@ nc localhost 5522
 
 # Commands
 
-/help - Show available commands
-/room <name> - Create and join room
-/join <name> - Join existing room
+/help - Show available Commands
+/room <name> - Create and join rooms
+/join <name> - Join existing rooms
 /list - List all rooms
-/deleteRoom <name> - Delete your room
+/deleteRoom <name> - Delete your rooms
 /exit - Exit chat
 
 # Tech Stack
