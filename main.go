@@ -230,11 +230,11 @@ func handleConnection(c Client) {
 		cmd, msg := parseMessage(strings.TrimSuffix(data, "\n"))
 
 		switch cmd {
-		case "/exit\n":
+		case "/exit":
 			fmt.Printf("client %s exit chat\n", c.name)
 			return
 
-		case "/help\n":
+		case "/help":
 			c.conn.Write([]byte("commands:\n/room - create and join room\n/join - join room\n/deleteRoom - delete room\n/list - list rooms\n/exit - exit chat\n"))
 
 		case "/list":
