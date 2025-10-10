@@ -198,7 +198,7 @@ func parseMessage(msg string) (string, string) {
 	split := strings.Split(msg, " ")
 
 	if len(split) == 1 {
-		return "", split[0]
+		return split[0], ""
 	}
 	return split[0], strings.Join(split[1:], " ")
 }
